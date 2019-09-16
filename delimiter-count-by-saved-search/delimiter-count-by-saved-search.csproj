@@ -153,6 +153,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="FieldEntity.cs" />
     <Compile Include="ScriptDelimiterCountBySavedSearchTest.cs" />
     <Compile Include="ImportHelper\Import.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

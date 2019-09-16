@@ -27,23 +27,15 @@ namespace delimiter_count_by_saved_search
         private IRSAPIClient _client;
         private IObjectManager _objectManagerClient;
         private int _workspaceId;
-        private Int32 _artifactTypeID;
+        private int _artifactTypeID;
         private readonly string _workspaceName = ConfigurationHelper.TEST_WORKSPACE_NAME;
         private readonly string _workspaceTemplateName = ConfigurationHelper.TEST_WORKSPACE_TEMPLATE_NAME;
         private IServicesMgr _servicesManager;
-        private IDBContext _eddsDbContext;
-        private const String _SCRIPT_NAME = "Create Object Records after Field Parsing";
-        private const String _SAVED_SEARCH_NAME = "Diana Test";
-        private const string _FIELD1 = "EmailTo";
-        private const string _FIELD2 = "EmailFrom";
-        private const string _FIELD3 = "EmailCC";
-        private const string _FIELD4 = "EmailBCC";
+        private const string _SCRIPT_NAME = "Delimiter Count by Saved Search";
+        private const string _SAVED_SEARCH_NAME = "Diana Test";
+        private const string _SOURCE_FIELD = "EmailTo";
         private const string _DELIMITER = ";";
-        private const string _FIELD_TO_POPULATE = "FieldToPopulate";
-        private const string _COUNTFIELD = "CountNserioField";
-        private Int32 _numberOfDocuments = 5;
-        private string _foldername = "Test Folder";
-        private Int32 _rootFolderArtifactID;
+        private const string _COUNT_DESTINATION_FIELD = "Count";
         private bool _workspaceCreatedByTest;
 
         #endregion
@@ -74,14 +66,13 @@ namespace delimiter_count_by_saved_search
 
             var path = GetLocalDocumentsFolderPath();
 
-
             //Import Application to the workspace
             //File path of the Test App
-            string[] path1 = { path, "RA_Create_Object_Record_Test_APP.rap" };
+            string[] path1 = { path, "RA_Delimiter-Count-By-Saved-Search-Test-APP.rap" };
             string filepathTestApp = Path.Combine(path1);
 
             //File path of the application containing the actual script
-            string[] path2 = { path, "RA_Create_Object_Records_After_Field_Parsing.rap" };
+            string[] path2 = { path, "RA_Delimiter-Count-By-Saved-Search.rap" };
             string filepathApp = Path.Combine(path2);
 
 
@@ -90,12 +81,10 @@ namespace delimiter_count_by_saved_search
             Relativity.Test.Helpers.Application.ApplicationHelpers.ImportApplication(_client, _workspaceId, true, filepathApp);
 
             //set artifacttypeid
-            _artifactTypeID = GetNSerioArtifactTypeID();
+            _artifactTypeID = (int)ArtifactType.Document;
 
             //Import Documents to workspace
             ImportHelper.Import.ImportDocument(_workspaceId, path);
-
-
         }
 
         #endregion
@@ -109,11 +98,6 @@ namespace delimiter_count_by_saved_search
             { //-- delete the workspace created by the test execution
                 DeleteWorkspace.Delete(_client, _workspaceId);
             }
-            else
-            {
-                //Delete all the results from script execution
-                DeleteAllObjectsOfSpecificTypeInWorkspace(_client, _workspaceId, _artifactTypeID);
-            }
         }
 
         #endregion
@@ -123,12 +107,8 @@ namespace delimiter_count_by_saved_search
         [Description("Verify the Relativity Script executes succesfully")]
         public void Integration_Test_Golden_Flow_Valid()
         {
-            //Arrange
-            Int32 FieldToPopulate = GetFieldArtifactID(_FIELD_TO_POPULATE, _workspaceId, _client, _artifactTypeID);
-            Int32 CountField = GetFieldArtifactID(_COUNTFIELD, _workspaceId, _client, _artifactTypeID);
-
             //Act
-            var scriptResults = ExecuteScript_CreateObjectRecordAfterFieldParsing(_SCRIPT_NAME, _workspaceId, _SAVED_SEARCH_NAME, _FIELD1, _DELIMITER, FieldToPopulate, CountField);
+            var scriptResults = ExecuteScript_DelimiterCountBySavedSearch(_SCRIPT_NAME, _SAVED_SEARCH_NAME, _SOURCE_FIELD, _DELIMITER, _COUNT_DESTINATION_FIELD);
 
             //Assert
             Assert.AreEqual(true, scriptResults.Success);
@@ -138,16 +118,13 @@ namespace delimiter_count_by_saved_search
         [Description("Verify object records are created successfully")]
         public void Integration_Test_Check_Created_Records()
         {
-            //Arrange
-            Int32 FieldToPopulate = GetFieldArtifactID(_FIELD_TO_POPULATE, _workspaceId, _client, _artifactTypeID);
-            Int32 CountField = GetFieldArtifactID(_COUNTFIELD, _workspaceId, _client, _artifactTypeID);
-
             //Act
-            var scriptResults = ExecuteScript_CreateObjectRecordAfterFieldParsing(_SCRIPT_NAME, _workspaceId, _SAVED_SEARCH_NAME, _FIELD1, _DELIMITER, FieldToPopulate, CountField);
+            var scriptResults = ExecuteScript_DelimiterCountBySavedSearch(_SCRIPT_NAME, _SAVED_SEARCH_NAME, _SOURCE_FIELD, _DELIMITER, _COUNT_DESTINATION_FIELD);
             var objectsWhereCreatedSuccessfully = GetCreatedObjectsStatus();
             //Assert
             Assert.AreEqual(true, scriptResults.Success);
             Assert.AreEqual(true, objectsWhereCreatedSuccessfully);
+            
         }
 
         #endregion
@@ -170,47 +147,28 @@ namespace delimiter_count_by_saved_search
         public bool GetCreatedObjectsStatus()
         {
             bool state = false;
-            QueryRequest request = new QueryRequest();
-            request.ObjectType = new ObjectTypeRef { ArtifactTypeID = _artifactTypeID };
-            request.Fields = new[]
+            QueryRequest request = new QueryRequest
             {
-                new FieldRef { Name = _FIELD_TO_POPULATE },
-                new FieldRef { Name = _COUNTFIELD }
+                ObjectType = new ObjectTypeRef { ArtifactTypeID = _artifactTypeID },
+                Fields = new[]
+                    {
+                        new FieldRef { Name = _COUNT_DESTINATION_FIELD }
+                    }
             };
-            Task<QueryResultSlim> taskForResult = _objectManagerClient.QuerySlimAsync(_workspaceId, request, 0, 1000);
-            QueryResultSlim result = GetQueryResultFromTask(taskForResult);
 
+            Task<QueryResultSlim> taskForResult = _objectManagerClient.QuerySlimAsync(_workspaceId, request, 0, int.MaxValue);
+            QueryResultSlim result = GetQueryResultFromTask(taskForResult);
 
             if (result.TotalCount > 0)
             {
-                var extractedinfo = result.Objects.Select(p => p.Values[0] as string).ToArray();
-                if (extractedinfo.Contains("samplist.simpler@relativity.com") && extractedinfo.Contains("samplists@nserio.com"))
+                string extractedinfo = result.Objects[0].Values[0].ToString();
+                if (extractedinfo.Contains("2"))
                 {
-                    var extracteddocscount = result.Objects.Select(p => Convert.ToInt32(p.Values[1])).ToArray();
-                    if (extracteddocscount.All(p => p == 1))
-                    {
-                        state = true;
-                    }
+                    state = true;
                 }
             }
 
             return state;
-        }
-
-        public int GetNSerioArtifactTypeID()
-        {
-            QueryRequest request = new QueryRequest();
-            request.ObjectType = new ObjectTypeRef { ArtifactTypeID = (int)ArtifactType.ObjectType };
-            request.Fields = new[] { new FieldRef { Name = "Artifact Type ID" } };
-            request.Condition = $"('Name' IN ['{_NSERIO_OBJECTTYPE_NAME}'])";
-            Task<QueryResultSlim> taskForResult = _objectManagerClient.QuerySlimAsync(_workspaceId, request, 0, 1);
-            QueryResultSlim result = GetQueryResultFromTask(taskForResult);
-            var nserioType = result.Objects.FirstOrDefault();
-            if (nserioType == null)
-            {
-                throw new EntryPointNotFoundException($"Object Type {_NSERIO_OBJECTTYPE_NAME} not found");
-            }
-            return (int)(long)nserioType.Values.First();
         }
 
         public QueryResultSlim GetQueryResultFromTask(Task<QueryResultSlim> task)
@@ -219,7 +177,7 @@ namespace delimiter_count_by_saved_search
             return result;
         }
 
-        public RelativityScriptResult ExecuteScript_CreateObjectRecordAfterFieldParsing(String scriptName, Int32 workspaceArtifactId, String savedSearchName, string FieldName1, String Delimiter, Int32 fieldToPopulate, Int32 CountToField)
+        public RelativityScriptResult ExecuteScript_DelimiterCountBySavedSearch(string scriptName, string savedSearchName, string sourceFieldName, string delimiter, string countDestinationFieldName)
         {
             _client.APIOptions.WorkspaceID = _workspaceId;
 
@@ -243,21 +201,17 @@ namespace delimiter_count_by_saved_search
 
             //Retrieve script inputs
             RelativityScript script = relScriptQueryResults.Results[0].Artifact;
-            var inputnames = GetRelativityScriptInput(_client, scriptName, workspaceArtifactId);
+            var inputnames = GetRelativityScriptInput(_client, scriptName);
             int savedsearchartifactid = Query_For_Saved_SearchID(savedSearchName, _client);
 
             //Set inputs for script
             RelativityScriptInput input = new RelativityScriptInput(inputnames[0], savedsearchartifactid.ToString());
-            RelativityScriptInput input2 = new RelativityScriptInput(inputnames[1], FieldName1);
-            RelativityScriptInput input6 = new RelativityScriptInput(inputnames[2], _FIELD2); //pass in as a paramter
-            RelativityScriptInput input7 = new RelativityScriptInput(inputnames[3], _FIELD3); //pass in as a paramter
-            RelativityScriptInput input8 = new RelativityScriptInput(inputnames[4], _FIELD4); //pass in as a paramter
-            RelativityScriptInput input3 = new RelativityScriptInput(inputnames[5], Delimiter);
-            RelativityScriptInput input4 = new RelativityScriptInput(inputnames[6], fieldToPopulate.ToString());
-            RelativityScriptInput input5 = new RelativityScriptInput(inputnames[7], CountToField.ToString());
+            RelativityScriptInput input2 = new RelativityScriptInput(inputnames[1], sourceFieldName);
+            RelativityScriptInput input3 = new RelativityScriptInput(inputnames[2], delimiter);
+            RelativityScriptInput input4 = new RelativityScriptInput(inputnames[3], countDestinationFieldName);
 
             //Execute the script
-            List<RelativityScriptInput> inputList = new List<RelativityScriptInput> { input, input2, input3, input4, input5, input6, input7, input8 };
+            List<RelativityScriptInput> inputList = new List<RelativityScriptInput> { input, input2, input3, input4 };
 
             RelativityScriptResult scriptResult = null;
 
@@ -277,7 +231,7 @@ namespace delimiter_count_by_saved_search
             }
             else
             {
-                Int32 observedOutput = scriptResult.Count;
+                int observedOutput = scriptResult.Count;
                 Console.WriteLine("Result returned: {0}", observedOutput);
 
             }
@@ -285,93 +239,15 @@ namespace delimiter_count_by_saved_search
             return scriptResult;
         }
 
-        public RelativityScriptResult ExecuteScript_Test(String scriptName, Int32 workspaceArtifactId, String savedSearchName, string FieldName1, String Delimiter, Int32 fieldToPopulate, Int32 CountToField)
+        public static List<string> GetRelativityScriptInput(IRSAPIClient client, string scriptName)
         {
-            _client.APIOptions.WorkspaceID = _workspaceId;
-
-            //Retrieve script by name
-            Query<RelativityScript> relScriptQuery = new Query<RelativityScript>
-            {
-                Condition = new TextCondition(RelativityScriptFieldNames.Name, TextConditionEnum.EqualTo, scriptName),
-                Fields = FieldValue.AllFields
-            };
-
-            QueryResultSet<RelativityScript> relScriptQueryResults = _client.Repositories.RelativityScript.Query(relScriptQuery);
-            if (!relScriptQueryResults.Success)
-            {
-                throw new Exception(String.Format("An error occurred finding the script: {0}", relScriptQueryResults.Message));
-            }
-
-            if (!relScriptQueryResults.Results.Any())
-            {
-                throw new Exception(String.Format("No results returned: {0}", relScriptQueryResults.Message));
-            }
-
-            //Retrieve script inputs
-            RelativityScript script = relScriptQueryResults.Results[0].Artifact;
-            var inputnames = GetRelativityScriptInput(_client, scriptName, workspaceArtifactId);
-            int savedsearchartifactid = Query_For_Saved_SearchID(savedSearchName, _client);
-
-            //Set inputs for script
-
-            //Execute the script
-            List<RelativityScriptInput> inputList = new List<RelativityScriptInput> { };
-
-            RelativityScriptResult scriptResult = null;
-
-            try
-            {
-                scriptResult = _client.Repositories.RelativityScript.ExecuteRelativityScript(script, inputList);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("An error occurred: {0}", ex.Message);
-            }
-
-            //Check for success.
-            if (!scriptResult.Success)
-            {
-                Console.WriteLine(string.Format(scriptResult.Message));
-            }
-            else
-            {
-                Int32 observedOutput = scriptResult.Count;
-                Console.WriteLine("Result returned: {0}", observedOutput);
-
-            }
-
-            return scriptResult;
-        }
-
-        public static Int32 GetFieldArtifactID(String fieldname, Int32 workspaceID, IRSAPIClient client, int rdoFieldArtifactId)
-        {
-            int fieldArtifactId = 0;
-            client.APIOptions.WorkspaceID = workspaceID;
-
-            kCura.Relativity.Client.DTOs.Query<kCura.Relativity.Client.DTOs.Field> query = new kCura.Relativity.Client.DTOs.Query<kCura.Relativity.Client.DTOs.Field>
-            {
-                Condition = new TextCondition(kCura.Relativity.Client.DTOs.ArtifactFieldNames.TextIdentifier, TextConditionEnum.EqualTo, fieldname),
-                Fields = kCura.Relativity.Client.DTOs.FieldValue.AllFields
-            };
-
-            kCura.Relativity.Client.DTOs.QueryResultSet<kCura.Relativity.Client.DTOs.Field> resultSet = client.Repositories.Field.Query(query);
-            if (resultSet.Success)
-            {
-                fieldArtifactId = resultSet.Results[0].Artifact.ArtifactID;
-            }
-            return fieldArtifactId;
-        }
-
-        public static List<String> GetRelativityScriptInput(IRSAPIClient client, String scriptName, Int32 workspaceArtifactID)
-        {
-
             var returnval = new List<string>();
-            List<RelativityScriptInputDetails> scriptInputList = null;
+            List<RelativityScriptInputDetails> scriptInputList;
 
-            int artifactid = GetScriptArtifactId(scriptName, workspaceArtifactID, client);
+            int artifactid = GetScriptArtifactId(scriptName, client);
 
             // STEP 1: Using ArtifactID, set the script you want to run.
-            kCura.Relativity.Client.DTOs.RelativityScript script = new kCura.Relativity.Client.DTOs.RelativityScript(artifactid);
+            RelativityScript script = new RelativityScript(artifactid);
 
             // STEP 2: Call GetRelativityScriptInputs.
             try
@@ -384,32 +260,22 @@ namespace delimiter_count_by_saved_search
                 return returnval;
             }
 
-
             // STEP 3: Each RelativityScriptInputDetails object can be used to generate a RelativityScriptInput object, 
             // but this example only displays information about each input.
             foreach (RelativityScriptInputDetails relativityScriptInputDetails in scriptInputList)
             {
-                // ACB: Removed because it's only necessary for debugging
-                //Console.WriteLine("Input Name: {0}\n ", //Input Id:  {1}\nInput Type: ",
-                //    relativityScriptInputDetails.Name);
-                ////  relativityScriptInputDetails.Id);
-
-
                 returnval.Add(relativityScriptInputDetails.Name);
             }
             return returnval;
         }
 
-        public static Int32 GetScriptArtifactId(String scriptName, Int32 workspaceID, IRSAPIClient _client)
+        public static int GetScriptArtifactId(string scriptName, IRSAPIClient _client)
         {
             int ScriptArtifactId = 0;
-
-            QueryResult result = null;
-
             try
             {
                 Query newQuery = new Query();
-                TextCondition queryCondition = new TextCondition(kCura.Relativity.Client.DTOs.RelativityScriptFieldNames.Name, TextConditionEnum.Like, scriptName);
+                TextCondition queryCondition = new TextCondition(RelativityScriptFieldNames.Name, TextConditionEnum.Like, scriptName);
                 newQuery.Condition = queryCondition;
                 newQuery.ArtifactTypeID = 28;
                 _client.APIOptions.StrictMode = false;
@@ -424,11 +290,9 @@ namespace delimiter_count_by_saved_search
             return ScriptArtifactId;
         }
 
-        public static Int32 GetWorkspaceId(String workspaceName, IObjectManager _client)
+        public static int GetWorkspaceId(string workspaceName, IObjectManager _client)
         {
-            int workspaceArtifactId = 0;
-
-            QueryResult result = null;
+            int workspaceArtifactId = 0;           
 
             try
             {
@@ -449,14 +313,14 @@ namespace delimiter_count_by_saved_search
             return workspaceArtifactId;
         }
 
-        public static Int32 Query_For_Saved_SearchID(string savedSearchName, IRSAPIClient _client)
+        public static int Query_For_Saved_SearchID(string savedSearchName, IRSAPIClient _client)
         {
 
             int searchArtifactId = 0;
 
             var query = new Query
             {
-                ArtifactTypeID = (Int32)ArtifactType.Search,
+                ArtifactTypeID = (int)ArtifactType.Search,
                 Condition = new TextCondition("Name", TextConditionEnum.Like, savedSearchName)
             };
             QueryResult result = null;
@@ -478,7 +342,7 @@ namespace delimiter_count_by_saved_search
             return searchArtifactId;
         }
 
-        public static bool DeleteAllObjectsOfSpecificTypeInWorkspace(IRSAPIClient proxy, Int32 workspaceID, int artifactTypeID)
+        public static bool DeleteAllObjectsOfSpecificTypeInWorkspace(IRSAPIClient proxy, int workspaceID, int artifactTypeID)
         {
             proxy.APIOptions.WorkspaceID = workspaceID;
 
